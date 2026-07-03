@@ -1,0 +1,6 @@
+dynamixel_sdk
+numpy
+pyzmq
+ur-rtde
+tyro
+termcolor
