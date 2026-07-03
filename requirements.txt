@@ -1,6 +1,6 @@
 dynamixel_sdk
 numpy
 pyzmq
-ur-rtde
-tyro
-termcolor
+opencv-python
+ur-rtde       # Windows 端只需装这个
+pyrealsense2  # Windows 端只需装这个

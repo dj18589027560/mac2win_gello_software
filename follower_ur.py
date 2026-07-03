@@ -1,43 +1,87 @@
 #!/usr/bin/env python3
-"""UR follower — read leader joints via ZMQ, smoothly control UR via RTDE."""
+"""Windows follower — read leader joints via ZMQ + send RealSense video to Mac."""
 
+import threading
 import time
 
+import cv2
 import numpy as np
+import zmq
+import pyrealsense2 as rs
 from gello.zmq_core.robot_node import ZMQClientRobot
 from gello.robots.ur import URRobot
 
-# ---- 修改为你的实际参数 ----
+# ---- 通信参数 ----
 LEADER_IP = "192.168.x.x"        # ← MacBook 的局域网 IP
 ZMQ_PORT = 6000
 UR_IP = "192.168.1.10"           # ← UR 控制箱 IP
 USE_GRIPPER = True
-# 如果你发现某个关节方向反了，在这里反转对应 joint_sign
-# 例如 Joint 1 反了: -1 改成 1
-JOINT_MAP_SIGN = np.array([1, 1, 1, 1, 1, 1])   # ← 可逐个调整
+JOINT_MAP_SIGN = np.array([1, 1, 1, 1, 1, 1])
+
+# ---- 视频参数 ----
+VIDEO_PORT = 6001
+CAM_WIDTH, CAM_HEIGHT, CAM_FPS = 640, 480, 30
+JPEG_QUALITY = 80                # 1-100, 调低减少带宽
 # --------------------------------
 
+
+def video_sender_thread():
+    """读取 RealSense 帧，JPEG 压缩后通过 ZMQ PUB 发送到 Mac."""
+    ctx = zmq.Context()
+    pub = ctx.socket(zmq.PUB)
+    pub.bind(f"tcp://0.0.0.0:{VIDEO_PORT}")
+    print(f"Video sender started on port {VIDEO_PORT}")
+
+    # 初始化 RealSense
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.color, CAM_WIDTH, CAM_HEIGHT, rs.format.bgr8, CAM_FPS)
+    pipeline.start(config)
+
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+
+    try:
+        while True:
+            frames = pipeline.wait_for_frames()
+            color = frames.get_color_frame()
+            if not color:
+                continue
+
+            img = np.asanyarray(color.get_data())
+            _, jpeg = cv2.imencode(".jpg", img, encode_param)
+            pub.send(jpeg.tobytes())
+    except (KeyboardInterrupt, RuntimeError):
+        pass
+    finally:
+        pipeline.stop()
+        pub.close()
+        ctx.term()
+
+
+# --- 主控制逻辑 ---
 leader = ZMQClientRobot(port=ZMQ_PORT, host=LEADER_IP)
 follower = URRobot(robot_ip=UR_IP, no_gripper=not USE_GRIPPER)
 
-# 1) 读取当前 UR 位置
+# 读取初始位置，平滑过渡
 ur_joints = follower.get_joint_state()[:6]
-print(f"UR 初始关节: {[f'{x:.3f}' for x in ur_joints]}")
+print(f"UR init: {[f'{x:.3f}' for x in ur_joints]}")
 
-# 2) 读取主手位置
-leader_joints = leader.get_joint_state()
-leader_joints_6 = leader_joints[:6] * JOINT_MAP_SIGN
-print(f"主手关节:     {[f'{x:.3f}' for x in leader_joints_6]}")
+leader_joints = leader.get_joint_state()[:6] * JOINT_MAP_SIGN
+print(f"Leader:   {[f'{x:.3f}' for x in leader_joints]}")
 
-# 3) 从当前位置缓慢过渡到主手位置（100 步，~0.5 秒）
-print("平滑过渡中...")
+print("Smooth transition...")
 for t in np.linspace(0, 1, 100):
-    blend = (1 - t) * ur_joints + t * leader_joints_6
+    blend = (1 - t) * ur_joints + t * leader_joints
     follower.command_joint_state(blend)
     time.sleep(0.005)
 
-# 4) 进入主控制循环
-print("遥操作启动. Ctrl+C 停止.")
+# 启动视频发送线程
+vt = threading.Thread(target=video_sender_thread, daemon=True)
+vt.start()
+time.sleep(1)  # 等 RealSense 初始化
+
+# 主控制循环
+print("Teleoperation + video streaming started. Ctrl+C to stop.")
 try:
     while True:
         t_start = time.perf_counter()
@@ -50,4 +94,4 @@ try:
         if elapsed < 0.002:
             time.sleep(0.002 - elapsed)
 except KeyboardInterrupt:
-    print("\n已停止.")
+    print("\nStopped.")
