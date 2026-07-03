@@ -27,7 +27,7 @@ GRIPPER_CONFIG = (7, 202, 160)
 ZMQ_PORT = 6000
 
 # ---- 视频接收参数 ----
-FOLLOWER_IP = "192.168.x.x"   # ← 改成 Windows 的局域网 IP
+FOLLOWER_IP = "192.168.33.119"   # ← 改成 Windows 的局域网 IP
 VIDEO_PORT = 6001
 # --------------------------------
 
