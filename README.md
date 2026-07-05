@@ -2,7 +2,7 @@
 
 基于 [GELLO](https://github.com/wuphilipp/gello_software) 的跨平台 UR 遥操作精简版。
 
-**场景：** macOS 笔记本连接 Dynamixel 主手，通过局域网远程操控 Windows 电脑上的 UR 机械臂，同时实时查看 UR 上的 RealSense 相机画面。
+**场景：** macOS 笔记本连接 Dynamixel 主手，通过局域网（或 Tailscale 虚拟组网）远程操控 Windows 电脑上的 UR 机械臂，同时实时查看 UR 上的 RealSense 相机画面。
 
 ## 架构
 
@@ -93,7 +93,7 @@ python leader_mac.py
 pip install -r requirements.txt
 
 # 2. 修改 follower_ur.py 中的 IP 地址
-#    LEADER_IP = macOS 的局域网 IP
+#    LEADER_IP = Mac 的 Tailscale 虚拟 IP（或同局域网 IP）
 #    UR_IP     = UR 控制箱的 IP
 
 # 3. 启动
@@ -176,3 +176,81 @@ ipconfig
 MIT License（继承原始项目）
 
 原始项目：[wuphilipp/gello_software](https://github.com/wuphilipp/gello_software)
+
+---
+
+## 跨网络通信：Tailscale 虚拟组网（推荐）
+
+当 Mac 和 Windows 不在同一个 WiFi 网络时（例如移动小车换到不同的 WiFi 环境），两者无法通过局域网 IP 直接通信。Tailscale 可以解决这个问题。
+
+### 原理
+
+Tailscale 在每台设备上安装轻量级客户端，通过 NAT 穿透建立 P2P 加密隧道。每台设备获得一个固定的虚拟 IP（`100.x.x.x`），无论底层是哪个 WiFi 还是 4G 网络，虚拟 IP 始终不变。
+
+```
+┌─ Mac ──────────┐        WiFi A          ┌─ Windows ──────┐
+│                 │  ───────────────►      │                 │
+│  Tailscale      │    P2P 加密隧道        │  Tailscale      │
+│  100.x.x.x     │  ◄───────────────      │  100.x.x.x     │
+│                 │                        │                 │
+└─────────────────┘                        └─────────────────┘
+```
+
+- 非传统 VPN（不经过中心服务器转发）
+- 底层协议：WireGuard（加密、低延迟）
+- 控制服务器仅在初次握手时参与，通信建立后数据直连
+
+### 适用场景
+
+| Mac 网络 | Windows 网络 | 能否通信 |
+|---|---|---|
+| 同一 WiFi | 同一 WiFi | ✅ 直连 |
+| 不同 WiFi（同一区域） | 不同 WiFi | ✅ Tailscale 穿透 |
+| 家里 WiFi | 公司 WiFi | ✅ |
+| 家里 WiFi | 手机 4G 热点 | ✅ |
+| 有互联网的环境 | 有互联网的环境 | ✅ （必须都能上网） |
+
+### 安装与配置
+
+**1. 注册账号**
+打开 https://tailscale.com，点击 **Get Started Free**，用 Google / GitHub / Microsoft 账号登录。
+
+**2. Windows 端安装**
+```cmd
+winget install Tailscale.Tailscale
+```
+或从 https://tailscale.com/download 下载安装包。安装后任务栏找到 Tailscale 图标 → Sign in → 用同一账号登录。
+
+查虚拟 IP：
+```cmd
+tailscale ip -4
+```
+
+**3. Mac 端安装**
+```bash
+brew install --cask tailscale
+```
+或从 https://tailscale.com/download 下载安装。菜单栏 Tailscale 图标 → Sign in → 登录同一账号。
+
+查虚拟 IP：
+```bash
+tailscale ip -4
+```
+
+**4. 验证连通**
+Mac 上 ping Windows 的虚拟 IP：
+```bash
+ping 100.x.x.x
+```
+
+**5. 修改代码**
+将 `leader_mac.py` 和 `follower_ur.py` 中的 IP 替换为网 Tailscale 虚拟 IP（`100.x.x.x` 格式），之后无需再因网络切换而修改。
+
+### 延迟参考
+
+| 场景 | 典型延迟 |
+|---|---|
+| 同 WiFi 直连 | <1ms |
+| Tailscale 同 WiFi | <2ms |
+| Tailscale 跨网络 | 5-30ms |
+| 人体可感知阈值 | >50ms |

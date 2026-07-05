@@ -12,7 +12,7 @@ from gello.zmq_core.robot_node import ZMQClientRobot
 from gello.robots.ur import URRobot
 
 # ---- 通信参数 ----
-LEADER_IP = "192.168.33.153"        # ← MacBook 的局域网 IP
+LEADER_IP = "100.86.175.41"        # ← Mac Tailscale IP
 ZMQ_PORT = 6000
 UR_IP = "192.168.1.10"           # ← UR 控制箱 IP
 USE_GRIPPER = True
