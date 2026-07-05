@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Windows follower — read leader joints via ZMQ + send RealSense video to Mac."""
+# -*- coding: utf-8 -*-
+"""Windows follower - UR teleop + RealSense video stream to Mac."""
 
 import threading
 import time
@@ -11,28 +12,26 @@ import pyrealsense2 as rs
 from gello.zmq_core.robot_node import ZMQClientRobot
 from gello.robots.ur import URRobot
 
-# ---- 通信参数 ----
-LEADER_IP = "100.86.175.41"        # ← Mac Tailscale IP
+# ---- CONFIG ----
+LEADER_IP = "100.86.175.41"
 ZMQ_PORT = 6000
-UR_IP = "192.168.1.10"           # ← UR 控制箱 IP
-USE_GRIPPER = True
+UR_IP = "192.168.12.111"
+USE_GRIPPER = False
 JOINT_MAP_SIGN = np.array([1, 1, 1, 1, 1, 1])
 
-# ---- 视频参数 ----
 VIDEO_PORT = 6001
 CAM_WIDTH, CAM_HEIGHT, CAM_FPS = 640, 480, 30
-JPEG_QUALITY = 80                # 1-100, 调低减少带宽
-# --------------------------------
+JPEG_QUALITY = 80
+# ----------------
 
 
 def video_sender_thread():
-    """读取 RealSense 帧，JPEG 压缩后通过 ZMQ PUB 发送到 Mac."""
+    """Capture RealSense frames and send to Mac via ZMQ PUB."""
     ctx = zmq.Context()
     pub = ctx.socket(zmq.PUB)
     pub.bind(f"tcp://0.0.0.0:{VIDEO_PORT}")
     print(f"Video sender started on port {VIDEO_PORT}")
 
-    # 初始化 RealSense
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.color, CAM_WIDTH, CAM_HEIGHT, rs.format.bgr8, CAM_FPS)
@@ -58,15 +57,15 @@ def video_sender_thread():
         ctx.term()
 
 
-# --- 主控制逻辑 ---
+# --- Main ---
 leader = ZMQClientRobot(port=ZMQ_PORT, host=LEADER_IP)
 follower = URRobot(robot_ip=UR_IP, no_gripper=not USE_GRIPPER)
 
-# 读取初始位置，平滑过渡
-ur_joints = follower.get_joint_state()[:6]
+# Smooth transition from current UR position to leader position
+ur_joints = np.array(follower.get_joint_state()[:6])
 print(f"UR init: {[f'{x:.3f}' for x in ur_joints]}")
 
-leader_joints = leader.get_joint_state()[:6] * JOINT_MAP_SIGN
+leader_joints = np.array(leader.get_joint_state()[:6]) * JOINT_MAP_SIGN
 print(f"Leader:   {[f'{x:.3f}' for x in leader_joints]}")
 
 print("Smooth transition...")
@@ -75,19 +74,18 @@ for t in np.linspace(0, 1, 100):
     follower.command_joint_state(blend)
     time.sleep(0.005)
 
-# 启动视频发送线程
+# Start video thread
 vt = threading.Thread(target=video_sender_thread, daemon=True)
 vt.start()
-time.sleep(1)  # 等 RealSense 初始化
+time.sleep(1)
 
-# 主控制循环
 print("Teleoperation + video streaming started. Ctrl+C to stop.")
 try:
     while True:
         t_start = time.perf_counter()
 
         joints = leader.get_joint_state()
-        cmd = joints[:6] * JOINT_MAP_SIGN
+        cmd = np.array(joints[:6]) * JOINT_MAP_SIGN
         follower.command_joint_state(cmd)
 
         elapsed = time.perf_counter() - t_start
