@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Windows follower - UR teleop + RealSense video stream to Mac."""
 
@@ -16,7 +16,7 @@ from gello.robots.ur import URRobot
 LEADER_IP = "100.86.175.41"
 ZMQ_PORT = 6000
 UR_IP = "192.168.12.111"
-USE_GRIPPER = False
+USE_GRIPPER = True
 JOINT_MAP_SIGN = np.array([1, 1, 1, 1, 1, 1])
 
 VIDEO_PORT = 6001
@@ -62,11 +62,15 @@ leader = ZMQClientRobot(port=ZMQ_PORT, host=LEADER_IP)
 follower = URRobot(robot_ip=UR_IP, no_gripper=not USE_GRIPPER)
 
 # Smooth transition from current UR position to leader position
-ur_joints = np.array(follower.get_joint_state()[:6])
-print(f"UR init: {[f'{x:.3f}' for x in ur_joints]}")
+ur_all = follower.get_joint_state()
+ur_joints = np.array(ur_all)
+print(f"UR init ({len(ur_joints)}d): {[f'{x:.3f}' for x in ur_joints]}")
 
-leader_joints = np.array(leader.get_joint_state()[:6]) * JOINT_MAP_SIGN
-print(f"Leader:   {[f'{x:.3f}' for x in leader_joints]}")
+leader_all = leader.get_joint_state()
+leader_arm = np.array(leader_all[:6]) * JOINT_MAP_SIGN
+leader_gripper = np.array([leader_all[6]]) if len(leader_all) > 6 else np.array([])
+leader_joints = np.concatenate([leader_arm, leader_gripper])
+print(f"Leader   ({len(leader_joints)}d): {[f'{x:.3f}' for x in leader_joints]}")
 
 print("Smooth transition...")
 for t in np.linspace(0, 1, 100):
@@ -85,7 +89,9 @@ try:
         t_start = time.perf_counter()
 
         joints = leader.get_joint_state()
-        cmd = np.array(joints[:6]) * JOINT_MAP_SIGN
+        arm = np.array(joints[:6]) * JOINT_MAP_SIGN
+        gripper = np.array([joints[6]]) if len(joints) > 6 else np.array([])
+        cmd = np.concatenate([arm, gripper])
         follower.command_joint_state(cmd)
 
         elapsed = time.perf_counter() - t_start
