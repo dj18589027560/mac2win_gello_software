@@ -254,3 +254,102 @@ ping 100.x.x.x
 | Tailscale 同 WiFi | <2ms |
 | Tailscale 跨网络 | 5-30ms |
 | 人体可感知阈值 | >50ms |
+
+## Troubleshooting / Known Issues
+
+### 1. Gripper not moving (7th joint dropped)
+
+**Symptom:** Arm follows leader but gripper stays still.
+
+**Cause:** Main loop only passed `joints[:6]` (arm only), dropping the 7th gripper value.
+
+**Fix:** Concatenate arm and gripper before commanding:
+```python
+arm = np.array(joints[:6]) * JOINT_MAP_SIGN
+gripper = np.array([joints[6]]) if len(joints) > 6 else np.array([])
+cmd = np.concatenate([arm, gripper])
+follower.command_joint_state(cmd)
+```
+
+### 2. Gripper port 63352 blocked (WSAEACCES 10013)
+
+**Symptom:** Script hangs at startup when `USE_GRIPPER = True`. "以一种访问权限不允许的方式做了一个访问套接字的尝试".
+
+**Cause:** Windows Firewall blocks outbound TCP to port 63352.
+
+**Fix:** Run PowerShell as Administrator:
+```powershell
+New-NetFirewallRule -DisplayName "Python Gripper 63352" -Direction Outbound -Protocol TCP -RemotePort 63352 -Action Allow
+```
+
+### 3. TypeError: can't multiply sequence by non-int
+
+**Symptom:** `TypeError: can't multiply sequence by non-int of type 'numpy.float64'` during smooth transition.
+
+**Cause:** `follower.get_joint_state()` returns a Python list, not a numpy array.
+
+**Fix:** Wrap with `np.array()`:
+```python
+ur_joints = np.array(follower.get_joint_state()[:6])   # was: follower.get_joint_state()[:6]
+```
+
+### 4. Non-UTF-8 encoding error on Windows
+
+**Symptom:** `SyntaxError: Non-UTF-8 code starting with '\xe2'`
+
+**Cause:** Chinese characters in comments get corrupted when git auto-converts LF to CRLF on Windows.
+
+**Fix:** Add encoding header and use English comments:
+```python
+# -*- coding: utf-8 -*-
+```
+
+### 5. RTDE connection timeout
+
+**Symptom:** `RuntimeError: Could not connect to 192.168.x.x at 30004`
+
+**Cause:** UR has a program running that occupies the RTDE interface.
+
+**Fix:** On the UR teach pendant, stop the currently running program before starting `follower_ur.py`.
+
+### 6. accel vs acceleration parameter
+
+**Symptom:** `TypeError: moveJ(): incompatible function arguments`
+
+**Cause:** `ur-rtde` uses `acceleration` as parameter name, not `accel`.
+
+**Fix:** Use `acceleration=0.5` instead of `accel=0.5` in `moveJ()` and `servoJ()` calls.
+
+### 7. ZMQ connection timeout to Mac
+
+**Symptom:** `follower_ur.py` hangs before printing "Smooth transition".
+
+**Cause:** macOS `leader_mac.py` ZMQ server not started, or IP mismatch.
+
+**Fix:**
+- Start `leader_mac.py` on Mac first
+- Verify `LEADER_IP` matches the Mac's actual IP (`ipconfig` / `ifconfig`)
+- If using Tailscale, use the Tailscale virtual IP (`100.x.x.x`)
+
+### 8. macOS ZIP extraction creates nested folder
+
+**Symptom:** After unzipping, files are under `gello_software/gello_software/` instead of `gello_software/`.
+
+**Cause:** macOS Archive Utility wraps contents in an extra folder.
+
+**Fix:** Move files up one level:
+```powershell
+Move-Item gello_software\gello_software\* gello_software\
+Remove-Item gello_software\gello_software
+```
+
+### 9. Git CRLF warnings on Windows
+
+**Symptom:** `warning: LF will be replaced by CRLF` prevents `git pull`.
+
+**Fix:**
+```bash
+git config core.autocrlf true
+git stash
+git pull origin main
+```
