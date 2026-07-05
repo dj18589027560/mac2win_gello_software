@@ -31,35 +31,7 @@ FOLLOWER_IP = "100.67.171.63"   # ← Windows Tailscale IP
 VIDEO_PORT = 6001
 # --------------------------------
 
-def video_receiver_thread():
-    """接收并显示 Windows 端发来的 RealSense 视频流."""
-    ctx = zmq.Context()
-    sock = ctx.socket(zmq.SUB)
-    sock.connect(f"tcp://{FOLLOWER_IP}:{VIDEO_PORT}")
-    sock.subscribe(b"")  # 订阅所有消息
-    sock.setsockopt(zmq.RCVTIMEO, 1000)
-
-    cv2.namedWindow("RealSense Camera", cv2.WINDOW_NORMAL)
-    print(f"Video receiver connected to {FOLLOWER_IP}:{VIDEO_PORT}")
-
-    while True:
-        try:
-            jpeg_buf = sock.recv()
-            frame = cv2.imdecode(np.frombuffer(jpeg_buf, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if frame is not None:
-                cv2.imshow("RealSense Camera", frame)
-        except zmq.Again:
-            pass  # 超时正常，继续等下一帧
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cv2.destroyAllWindows()
-    sock.close()
-    ctx.term()
-
-
-# --- 主手服务 ---
+# 启动 ZMQ 服务（后台线程）
 robot = DynamixelRobot(
     joint_ids=JOINT_IDS,
     joint_offsets=JOINT_OFFSETS,
@@ -70,14 +42,37 @@ robot = DynamixelRobot(
 )
 
 server = ZMQServerRobot(robot, port=ZMQ_PORT, host="0.0.0.0")
+st = threading.Thread(target=server.serve, daemon=True)
+st.start()
 
-# 启动视频接收线程
-vt = threading.Thread(target=video_receiver_thread, daemon=True)
-vt.start()
+# 视频接收（主线程，OpenCV GUI 必须在主线程）
+ctx = zmq.Context()
+sock = ctx.socket(zmq.SUB)
+sock.connect(f"tcp://{FOLLOWER_IP}:{VIDEO_PORT}")
+sock.subscribe(b"")
+sock.setsockopt(zmq.RCVTIMEO, 1000)
 
+cv2.namedWindow("RealSense Camera", cv2.WINDOW_NORMAL)
 print(f"Leader started on port {ZMQ_PORT}, video from {FOLLOWER_IP}:{VIDEO_PORT}")
+print("Press Q on video window to quit.")
+
 try:
-    server.serve()
+    while True:
+        try:
+            jpeg_buf = sock.recv()
+            frame = cv2.imdecode(
+                np.frombuffer(jpeg_buf, dtype=np.uint8), cv2.IMREAD_COLOR
+            )
+            if frame is not None:
+                cv2.imshow("RealSense Camera", frame)
+        except zmq.Again:
+            pass
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 except KeyboardInterrupt:
-    print("\nShutting down.")
+    pass
+finally:
+    cv2.destroyAllWindows()
+    sock.close()
+    ctx.term()
     robot._driver.close()
