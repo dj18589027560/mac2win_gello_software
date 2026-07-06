@@ -353,3 +353,19 @@ git config core.autocrlf true
 git stash
 git pull origin main
 ```
+
+### 10. Network switch does not trigger reconnect
+
+**Symptom:** After WiFi switch, script hangs silently without printing "Connection lost". Must press Ctrl+C to exit.
+
+**Root cause:** `ZMQClientRobot.get_joint_state()` calls `recv()` on a socket with no receive timeout (`RCVTIMEO`). When the TCP connection dies silently (WiFi drop), `recv()` blocks forever instead of throwing an exception. TCP keepalive defaults to ~2 hours, so the block can persist indefinitely.
+
+**Planned fix:** Set `self._socket.setsockopt(zmq.RCVTIMEO, 3000)` in `ZMQClientRobot.__init__` (in `gello/zmq_core/robot_node.py`). After 3 seconds without data, `zmq.Again` is raised → caught internally → re-raised as `RuntimeError` → caught by `follower_ur.py` reconnect logic.
+
+### 11. RealSense video lost after network switch
+
+**Symptom:** After reconnection, UR arm responds but Mac no longer receives video.
+
+**Root cause:** The video sender thread runs independently and its ZMQ PUB socket may become stale after a network interface change. The Mac subscriber loses track of the stream.
+
+**Fix (applied):** On network reconnect, stop the old video thread (release camera + close PUB socket) and start a fresh one. See `start_video_thread()` / `video_stop.set()` in `follower_ur.py`.
