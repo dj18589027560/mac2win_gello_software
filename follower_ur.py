@@ -86,16 +86,20 @@ time.sleep(1)
 print("Teleoperation + video streaming started. Ctrl+C to stop.")
 try:
     while True:
-        t_start = time.perf_counter()
+        try:
+            t_start = time.perf_counter()
 
-        joints = leader.get_joint_state()
-        arm = np.array(joints[:6]) * JOINT_MAP_SIGN
-        gripper = np.array([joints[6]]) if len(joints) > 6 else np.array([])
-        cmd = np.concatenate([arm, gripper])
-        follower.command_joint_state(cmd)
+            joints = leader.get_joint_state()
+            arm = np.array(joints[:6]) * JOINT_MAP_SIGN
+            gripper = np.array([joints[6]]) if len(joints) > 6 else np.array([])
+            cmd = np.concatenate([arm, gripper])
+            follower.command_joint_state(cmd)
 
-        elapsed = time.perf_counter() - t_start
-        if elapsed < 0.002:
-            time.sleep(0.002 - elapsed)
+            elapsed = time.perf_counter() - t_start
+            if elapsed < 0.002:
+                time.sleep(0.002 - elapsed)
+        except (zmq.error.ZmqError, EOFError) as e:
+            print(f"Connection lost ({e}), reconnecting in 5s...")
+            time.sleep(5)
+            leader = ZMQClientRobot(port=ZMQ_PORT, host=LEADER_IP)
 except KeyboardInterrupt:
-    print("\nStopped.")
