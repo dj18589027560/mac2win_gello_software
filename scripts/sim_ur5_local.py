@@ -40,7 +40,7 @@ from gello.dynamixel.driver import DynamixelDriver
 # 第 2 部分：Dynamixel 主手配置（与 leader_mac.py 保持一致）
 # ============================================================
 SERIAL_PORT = "/dev/cu.usbserial-FTBTJFYI"
-JOINT_IDS = (1, 2, 3, 4, 5, 6)
+JOINT_IDS = (1, 2, 3, 4, 5, 6, 7)
 JOINT_OFFSETS = [
     1 * np.pi / 2,
     3 * np.pi / 2,
@@ -195,6 +195,10 @@ raw_init = driver.get_joints()
 leader_init = (raw_init[:6] - joint_offsets_arr) * joint_signs_arr
 print(f"主手初始角度 (rad): {[f'{x:.3f}' for x in leader_init]}")
 
+# 记录初始夹爪位置，用于后续计算开合偏移量
+_gripper_init_rad = raw_init[6] if len(raw_init) > 6 else 0.0
+print(f"夹爪初始角度: {math.degrees(_gripper_init_rad):.1f} deg")
+
 # 将 UR5 设为主手初始角度（而不是默认的 u_init）
 data.qpos[3:9] = leader_init
 data.ctrl[J1:J6+1] = leader_init
@@ -219,18 +223,15 @@ try:
         data.ctrl[J1:J6+1] = ur5_targets
 
         # --- 第 8d 步：夹爪 ---
+        # 夹爪执行器 ctrlrange = [-0.015, 0.015]
+        # +0.015 = 打开, -0.015 = 关闭
         if len(raw) > 6:
-            # 夹爪原始角度 → [0, 1] 开合比
-            gripper_raw = raw[6]
-            gripper_open = 202.1  # 度, 同标定值
-            gripper_close = 160.1
-            gripper_norm = (gripper_raw - math.radians(gripper_close)) / (
-                math.radians(gripper_open) - math.radians(gripper_close)
-            )
-            gripper_norm = max(0.0, min(1.0, gripper_norm))
-            # 映射到夹爪开度 (0~0.04 rad)
-            data.ctrl[GL] = gripper_norm * 0.04
-            data.ctrl[GR] = (1.0 - gripper_norm) * 0.04
+            # 相对初始夹爪位置的偏移 → 归一化
+            gripper_delta = _gripper_init_rad - raw[6]
+            # 限制范围 ±0.5 rad (~28 度), 映射到执行器范围
+            gripper_norm = max(-1.0, min(1.0, gripper_delta / 0.5))
+            data.ctrl[GL] = -gripper_norm * 0.015    # 挤压→负值→关闭
+            data.ctrl[GR] = gripper_norm * 0.015     # 挤压→正值→关闭
 
         # --- 第 8e 步：渲染 ---
         glfw.poll_events()
