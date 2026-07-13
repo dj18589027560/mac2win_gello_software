@@ -369,3 +369,62 @@ git pull origin main
 **Root cause:** The video sender thread runs independently and its ZMQ PUB socket may become stale after a network interface change. The Mac subscriber loses track of the stream.
 
 **Fix (applied):** On network reconnect, stop the old video thread (release camera + close PUB socket) and start a fresh one. See `start_video_thread()` / `video_stop.set()` in `follower_ur.py`.
+
+---
+
+## MuJoCo UR5 本地仿真
+
+不依赖 Windows 和真实 UR 机器人，在 Mac 上直接用主手驱动 MuJoCo 中的 UR5 模型。
+
+### 架构
+
+```
+Dynamixel 主手 (USB)
+  → DynamixelDriver 读取关节角度
+  → 映射到 UR5 关节空间 (offset + sign)
+  → data.ctrl[3:9] = mapped_angles
+  → mj_step() 物理推进
+  → GLFW 窗口渲染
+```
+
+跳过 ZMQ、跳过网络、跳过 RTDE，主手直驱仿真，延迟 <1ms。
+
+### 前置条件
+
+```bash
+cd ~/Documents
+git clone https://github.com/dj18589027560/mujoco-ur5-articulated.git
+pip install mujoco==3.1.6 glfw
+```
+
+### 启动
+
+```bash
+cd ~/Documents/gello_software
+conda activate gello
+python scripts/sim_ur5_local.py
+```
+
+### 命令参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--model-dir` | `../mujoco-ur5-articulated` | MuJoCo 模型目录路径 |
+| `--port` | `/dev/cu.usbserial-xxxxx` | Dynamixel 串口 |
+
+### 操作
+
+- 掰动主手 → UR5 跟随运动
+- 方向键旋转相机视角
+- 滚轮缩放
+- ESC 退出
+
+### 与真实 UR 控制的区别
+
+| 特性 | 真实 UR (`follower_ur.py`) | MuJoCo 仿真 (`sim_ur5_local.py`) |
+|---|---|---|
+| 从手 | 物理 UR 机器人 | MuJoCo 物理引擎 |
+| 通信 | ZMQ + RTDE (局域网) | 进程内共享内存 |
+| 延迟 | 5-30ms | <1ms |
+| 依赖 | Windows + ur-rtde | Mac + MuJoCo |
+| 安全性 | 可能损坏硬件 | 无风险 |

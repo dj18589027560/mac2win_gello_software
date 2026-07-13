@@ -299,3 +299,41 @@ Windows 端:
 | REQ/REP 而非 PUB/SUB | 控制通道需要可靠应答，视频通道用 PUB/SUB 更合适（已在入口脚本中实现） |
 | 后台线程读 Dynamixel | 串口通信有阻塞 IO，独立线程保证主循环不卡 |
 | 角度映射而非直接透传 | Dynamixel 原始脉冲无物理意义，需要 offset/sign 映射到机器人坐标系 |
+
+---
+
+## scripts/sim_ur5_local.py — MuJoCo UR5 本地仿真
+
+**位置：** `gello_software/scripts/sim_ur5_local.py`
+
+**用途：** 不经过 ZMQ 和 Windows，在 Mac 上直接用 Dynamixel 主手驱动 MuJoCo 中的 UR5 仿真。
+
+### 核心流程
+
+```
+DynamixelDriver.get_joints()          ← 读电机脉冲
+    → (raw - offset) * sign           ← 映射到 UR5 关节空间
+    → data.ctrl[3:9] = angles         ← 写入 MuJoCo 执行器
+    → mj_step()                       ← 物理引擎推进
+    → GLFW 渲染                        ← 窗口显示
+```
+
+### 执行器映射
+
+| 索引 | MuJoCo 执行器 | 数据来源 |
+|---|---|---|
+| 0, 1, 2 | 移动底座（未使用） | 固定 0 |
+| 3 | UR5 J1 - shoulder_pan | Leader[0] × sign[0] |
+| 4 | UR5 J2 - shoulder_lift | Leader[1] × sign[1] |
+| 5 | UR5 J3 - elbow | Leader[2] × sign[2] |
+| 6 | UR5 J4 - wrist_1 | Leader[3] × sign[3] |
+| 7 | UR5 J5 - wrist_2 | Leader[4] × sign[4] |
+| 8 | UR5 J6 - wrist_3 | Leader[5] × sign[5] |
+| 9, 10 | 夹爪 | Leader[6] → [0,1] 归一化 |
+
+### 技术特点
+
+- **直驱：** 不经过任何中间层，Dynamixel 读数直接写入 MuJoCo 控制数组
+- **共享内存：** MuJoCo 的 `data` 结构是进程内共享，写入 `data.ctrl` 后后台物理线程下一次 `mj_step()` 自动读取
+- **双线程：** 物理线程独立运行（~500Hz），渲染线程控制循环 ~100Hz
+- **离线可用：** 不需要连接任何网络或外部设备（仅需主手 USB）
