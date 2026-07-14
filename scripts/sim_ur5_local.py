@@ -69,7 +69,7 @@ parser.add_argument("--port", default=SERIAL_PORT,
 args = parser.parse_args()
 
 MODEL_DIR = os.path.abspath(args.model_dir)
-MODEL_XML = os.path.join(MODEL_DIR, "ur5_articulated.xml")
+MODEL_XML = os.path.join(MODEL_DIR, "ur5_2f85.xml")
 
 if not os.path.exists(MODEL_XML):
     print(f"错误：找不到模型文件 {MODEL_XML}")
@@ -101,15 +101,15 @@ print(f"MuJoCo {mujoco.__version__}  自由度 nq={model.nq}  执行器 nu={mode
 # actuator 索引:
 #   [0, 1, 2] = 移动底座 (base_x, base_y, base_theta) — 速度控制
 #   [3, 4, 5, 6, 7, 8] = UR5 关节 (J1..J6) — 位置控制
-#   [9, 10] = 夹爪 (gripper_left, gripper_right)
+#   [9] = 夹爪 (general actuator, 0=全开, 255=全闭)
 J1, J2, J3, J4, J5, J6 = 3, 4, 5, 6, 7, 8
-GL, GR = 9, 10
+GRIP = 9
 
 # 设置 UR5 初始姿态（和 run_ur5_articulated.py 一致）
 u_init = [-math.pi/2, -3.054, -0.0873, -math.pi, -math.pi/2, -math.pi]
 data.qpos[3:9] = u_init
 data.ctrl[J1:J6+1] = u_init
-data.ctrl[GL] = data.ctrl[GR] = 0.0
+data.ctrl[GRIP] = 0  # 夹爪全开
 mujoco.mj_forward(model, data)
 
 # ============================================================
@@ -119,7 +119,7 @@ if not glfw.init():
     print("GLFW 初始化失败")
     sys.exit(1)
 
-window = glfw.create_window(1200, 800, "GELLO → MuJoCo UR5", None, None)
+window = glfw.create_window(1200, 800, "GELLO → MuJoCo UR5 + 2F-85", None, None)
 if not window:
     glfw.terminate()
     sys.exit(1)
@@ -223,15 +223,13 @@ try:
         data.ctrl[J1:J6+1] = ur5_targets
 
         # --- 第 8d 步：夹爪 ---
-        # 夹爪执行器 ctrlrange = [-0.015, 0.015]
-        # +0.015 = 打开, -0.015 = 关闭
+        # 夹爪 actuator: general, 范围 0-255
+        # 0 = 全开, 255 = 全闭
         if len(raw) > 6:
-            # 相对初始夹爪位置的偏移 → 归一化
+            # 相对初始夹爪位置的偏移 → 归一化到 [0, 1]
             gripper_delta = _gripper_init_rad - raw[6]
-            # 限制范围 ±0.5 rad (~28 度), 映射到执行器范围
-            gripper_norm = max(-1.0, min(1.0, gripper_delta / 0.5))
-            data.ctrl[GL] = -gripper_norm * 0.015    # 挤压→负值→关闭
-            data.ctrl[GR] = gripper_norm * 0.015     # 挤压→正值→关闭
+            gripper_norm = max(0.0, min(1.0, gripper_delta / 0.5))
+            data.ctrl[GRIP] = gripper_norm * 255
 
         # --- 第 8e 步：渲染 ---
         glfw.poll_events()
