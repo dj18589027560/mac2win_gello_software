@@ -72,6 +72,7 @@ class ZMQClientRobot(Robot):
         self._context = zmq.Context()
         self._socket = self._context.socket(zmq.REQ)
         self._socket.connect(f"tcp://{host}:{port}")
+        self._socket.setsockopt(zmq.RCVTIMEO, 3000)  # 3s timeout, avoid hanging forever
 
     def num_dofs(self) -> int:
         """Get the number of joints in the robot.
