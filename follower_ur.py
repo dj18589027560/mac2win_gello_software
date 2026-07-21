@@ -98,7 +98,7 @@ try:
             elapsed = time.perf_counter() - t_start
             if elapsed < 0.002:
                 time.sleep(0.002 - elapsed)
-        except (zmq.error.ZmqError, EOFError) as e:
+        except (zmq.error.ZmqError, EOFError, RuntimeError) as e:
             print(f"Connection lost ({e}), reconnecting in 5s...")
             time.sleep(5)
             leader = ZMQClientRobot(port=ZMQ_PORT, host=LEADER_IP)
